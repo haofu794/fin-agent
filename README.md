@@ -46,6 +46,8 @@ Harness 其实就是一个循环。我把对话历史发给模型，如果模型
 
 模型能用的工具有 4 个：get_metric 查一个财务数字，calculator 做计算，search_filings 在财报原文里检索，list_companies 列出有哪些公司和指标。
 
+这 4 个工具我也做成了一个 MCP server。MCP 是现在 AI 应用之间通用的工具接口，有点像工具的 USB-C。做成 MCP 以后，不只是我自己的 harness，Claude Desktop、Cursor 这些支持 MCP 的程序也能直接调用它们，比如在 Claude Desktop 里问 Apple 的营收，它会去查我的数据库。
+
 ---
 
 ## 我为什么这样设计
@@ -67,6 +69,8 @@ calculator 我没有用 Python 自带的 `eval()`，因为 `eval` 什么代码�
 数据库的安全我做了三层：白名单检查参数、`?` 参数化查询、只读模式打开数据库。任何一层单独都可能有漏洞，三层同时失效的可能性就小很多了。
 
 检索我用了两种方法再合起来。BM25 是按关键词匹配，对"TSMC""Taiwan"这种专有名词很准，但不懂近义词；向量检索懂意思，"outsourced"和"outsourcing partners"它知道是一回事，但对专有名词没那么敏感。两种结果我用 RRF 合并，它只看名次，公式是 1/(60 + 名次)，所以不用管两种方法的分数尺度不一样。我没有用向量数据库，因为一共只有 3,999 个向量，而且会先按公司和年份筛选，NumPy 几毫秒就算完了。数据量到几十万的时候再换也不迟。
+
+MCP server 里的工具列表和说明，我没有重新写一遍，而是直接用 harness 的那份 `TOOL_SCHEMAS`，调用也是走同一个 `run_tool()`。这样两边永远是同一套工具，改一个地方两边都变。我的 harness 自己还是直接调用 `run_tool()`，没有绕道 MCP，因为在同一个程序里直接调函数最简单，也最快；MCP 只是给外面的程序用的。
 
 最后一个是财年 guardrail，这个是评测逼出来的，后面会讲。
 
@@ -173,12 +177,28 @@ python scripts/ask.py "Apple 2024 财年营收比 2023 年增长了多少？"
 # 在网页提问：只在本机运行，打开 http://127.0.0.1:8000
 python web/app.py
 
+# 检查 MCP server：这个脚本会像 Claude Desktop 一样启动它，列出工具再调用几次
+python scripts/try_mcp.py
+
 # 评测
 python evals/run_eval.py --set all --name my_run          # 60 题，大概 1 分钟
 python evals/run_eval.py --set all --no-calculator-fair   # 去掉 calculator 的公平对比
 python evals/run_eval.py --set all --search-mode bm25     # 只用 BM25
 python evals/summarize.py my_run                          # 把多次运行的结果汇总
 python evals/retrieval_ablation.py my_run                 # 单独比较检索方式
+```
+
+如果想在 Claude Desktop 里用这些工具，打开 `~/Library/Application Support/Claude/claude_desktop_config.json`，加上下面这段，然后重启 Claude Desktop。`command` 要写 fin-agent 这个环境里 Python 的完整路径（在环境里运行 `which python` 就能看到），因为 Claude Desktop 不知道你激活的是哪个环境。
+
+```json
+{
+  "mcpServers": {
+    "fin-agent": {
+      "command": "/你的路径/envs/fin-agent/bin/python",
+      "args": ["/你的路径/fin-agent/scripts/mcp_server.py"]
+    }
+  }
+}
 ```
 
 模型是通过 OpenAI 兼容的接口调用的，换模型只要改 `.env`。上面的评测结果用的是 gpt-5.4-mini（Agent）、gpt-5.4（裁判）和 text-embedding-3-small。`.env.example` 里也留了本地 Ollama 的配置，但这条路我还没跑过评测。
@@ -204,7 +224,7 @@ fin-agent/
 ├── web/
 │   ├── app.py          # FastAPI：/api/ask 一次返回，/api/ask/stream 每走一步推一步（SSE），还有限流
 │   └── static/index.html  # 网页：推理步骤、数字标记、引用弹窗，不依赖任何外部资源
-├── scripts/            # 准备数据、提问、检查环境
+├── scripts/            # 准备数据、提问、检查环境；mcp_server.py 是 MCP server，try_mcp.py 用来测试它
 └── evals/              # 题目、评分、汇总、检索对比
 ```
 
@@ -222,4 +242,4 @@ MD&A 里的金额一般是以百万美元为单位的，但这句"单位：百�
 
 网页只在本机跑，我没有部署。部署到公网的话要先加登录和按用户限流，不然谁都能用我的 API 额度。还有，浏览器关掉以后，正在跑的那道题不会停，最多会跑完 8 步，因为 harness 里还没有中途取消的机制。
 
-另外我还打算把 4 个工具包成 MCP server，这样别的 Agent 程序也能直接调用。
+MCP server 我只用测试脚本和协议本身测过，还没有在 Claude Desktop 里实际接上用过。另外 search_filings 每次检索都要调用 OpenAI 的 embedding，所以在 Claude Desktop 里用它也会花我的 API 额度。
