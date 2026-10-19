@@ -1,0 +1,20 @@
+{"id": "H01", "type": "hard_num", "tag": "隐含年份", "q": "Apple 最近一个财年的净利润是多少？", "gold": "M('AAPL','NetIncome',2025)", "unit": "USD"}
+{"id": "H02", "type": "hard_num", "tag": "财年陷阱", "q": "NVIDIA 截至 2025 年 1 月的那个财年，营收是多少？", "gold": "M('NVDA','Revenue',2025)", "unit": "USD"}
+{"id": "H03", "type": "hard_num", "tag": "多步查询", "q": "2020–2025 年间，Apple 哪一个财年的营收最高？是多少？", "gold": "M('AAPL','Revenue',2025)", "unit": "USD", "entity": ["2025"]}
+{"id": "H04", "type": "hard_num", "tag": "多步查询", "q": "FY2025 Apple、Microsoft、NVIDIA、Alphabet、Meta 五家公司中，净利率最高的是哪家？是多少？", "gold": "M('NVDA','NetIncome',2025)/M('NVDA','Revenue',2025)*100", "unit": "%", "entity": ["NVIDIA", "NVDA", "英伟达"]}
+{"id": "H05", "type": "hard_num", "tag": "负数", "q": "Intel 2024 年的净亏损相当于其营收的百分之几？", "gold": "abs(M('INTC','NetIncome',2024))/M('INTC','Revenue',2024)*100", "unit": "%", "abs": true}
+{"id": "H06", "type": "hard_num", "tag": "数字在原文里", "q": "Costco FY2025 的会员费收入增长了百分之几？", "gold": "10", "unit": "%"}
+{"id": "H07", "type": "hard_num", "tag": "数字在原文里", "q": "As of the end of fiscal 2024, approximately how many full-time equivalent employees did Apple have?", "gold": "164000", "unit": "count"}
+{"id": "H08", "type": "hard_num", "tag": "多步查询", "q": "Tesla 2020–2025 年平均每年的资本开支是多少？", "gold": "sum(M('TSLA','CapEx',y) for y in range(2020,2026))/6", "unit": "USD"}
+{"id": "H09", "type": "hard_num", "tag": "多步查询", "q": "Boeing 2020 到 2024 年五年累计净亏损是多少？", "gold": "sum(M('BA','NetIncome',y) for y in range(2020,2025))", "unit": "USD"}
+{"id": "H10", "type": "hard_num", "tag": "推导", "q": "Walmart FY2025 的毛利率是多少？", "gold": "(M('WMT','Revenue',2025)-M('WMT','CostOfRevenue',2025))/M('WMT','Revenue',2025)*100", "unit": "%"}
+{"id": "H11", "type": "hard_text", "tag": "换说法", "q": "苹果的产品主要是在哪些地方造出来的？", "gold_phrases": ["China mainland, India, Japan, South Korea, Taiwan and Vietnam"], "key_points": ["Manufacturing is done mostly by outsourcing partners", "Located primarily in China mainland, India, Japan, South Korea, Taiwan and Vietnam"]}
+{"id": "H12", "type": "hard_text", "tag": "换说法", "q": "NVIDIA 的芯片封装用的是什么技术？内存是从哪些公司买的？", "gold_phrases": ["CoWoS"], "key_points": ["NVIDIA uses CoWoS technology for semiconductor packaging", "Memory is purchased from SK Hynix, Micron and Samsung"]}
+{"id": "H13", "type": "hard_text", "tag": "换说法", "q": "根据 Boeing FY2024 的 10-K，737 的月产量受到什么上限？为什么？", "gold_phrases": ["38 per month"], "key_points": ["The FAA will not approve 737 production rate increases beyond 38 per month", "Until Boeing complies with required quality and safety standards (after the January 2024 Alaska Airlines 737-9 accident)"]}
+{"id": "H14", "type": "hard_text", "tag": "换说法", "q": "根据 Meta FY2024 的 10-K，Meta 有没有在研究用肌肉信号来控制设备的技术？", "gold_phrases": ["electromyography"], "key_points": ["Yes: Reality Labs explores neural interfaces using electromyography (EMG)", "Lets people control devices using neuromuscular signals", "This is long-term research for products that may be realized in the next decade"]}
+{"id": "H15", "type": "hard_text", "tag": "数字在原文里", "q": "可口可乐旗下的饮料每天在全球卖出多少份？大约占全球饮料消费的多少？", "gold_phrases": ["2.2 billion"], "key_points": ["About 2.2 billion servings per day of Company-trademarked beverages", "Out of an estimated 65 billion servings of all beverages consumed worldwide daily (about 3.4%)"]}
+{"id": "H16", "type": "unanswerable", "tag": "无数据", "q": "JPMorgan 2024 年的净利润是多少？", "why": "JPMorgan is not in the database"}
+{"id": "H17", "type": "unanswerable", "tag": "无数据", "q": "Tesla 2019 年的营收是多少？", "why": "Only fiscal years 2020-2025 are available"}
+{"id": "H18", "type": "unanswerable", "tag": "无数据", "q": "Apple FY2026 的营收是多少？", "why": "FY2026 is not in the database"}
+{"id": "H19", "type": "unanswerable", "tag": "无数据", "q": "McDonald's 2024 年的毛利率是多少？", "why": "McDonald's does not report CostOfRevenue or GrossProfit, so gross margin cannot be computed from the data"}
+{"id": "H20", "type": "unanswerable", "tag": "无数据", "q": "NVIDIA 在 FY2023 的 10-K 里列出了哪些主要风险？", "why": "Only FY2024 and FY2025 10-K text is indexed; FY2023 is not available"}

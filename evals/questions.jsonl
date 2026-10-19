@@ -1,0 +1,40 @@
+{"id": "L01", "type": "lookup", "q": "Apple 2024 财年的净利润是多少？", "gold": "M('AAPL','NetIncome',2024)", "unit": "USD"}
+{"id": "L02", "type": "lookup", "q": "What was Microsoft's revenue in fiscal year 2025?", "gold": "M('MSFT','Revenue',2025)", "unit": "USD"}
+{"id": "L03", "type": "lookup", "q": "NVIDIA FY2025 的营收是多少？", "gold": "M('NVDA','Revenue',2025)", "unit": "USD"}
+{"id": "L04", "type": "lookup", "q": "Tesla 2023 年的经营现金流是多少？", "gold": "M('TSLA','OperatingCashFlow',2023)", "unit": "USD"}
+{"id": "L05", "type": "lookup", "q": "How much total assets did Coca-Cola have at the end of fiscal 2024?", "gold": "M('KO','TotalAssets',2024)", "unit": "USD"}
+{"id": "L06", "type": "lookup", "q": "Amazon 2022 年底有多少现金及现金等价物？", "gold": "M('AMZN','Cash',2022)", "unit": "USD"}
+{"id": "L07", "type": "lookup", "q": "Alphabet 2021 年净利润多少？", "gold": "M('GOOGL','NetIncome',2021)", "unit": "USD"}
+{"id": "L08", "type": "lookup", "q": "What were Meta's capital expenditures in 2024?", "gold": "M('META','CapEx',2024)", "unit": "USD"}
+{"id": "L09", "type": "lookup", "q": "Walmart FY2025 的股东权益是多少？", "gold": "M('WMT','StockholdersEquity',2025)", "unit": "USD"}
+{"id": "L10", "type": "lookup", "q": "Procter & Gamble FY2024 的稀释每股收益（diluted EPS）是多少？", "gold": "M('PG','EPSDiluted',2024)", "unit": "USD/shares"}
+{"id": "L11", "type": "lookup", "q": "Boeing 2023 年的净利润（或净亏损）是多少？", "gold": "M('BA','NetIncome',2023)", "unit": "USD"}
+{"id": "L12", "type": "lookup", "q": "What was Chevron's total revenue in 2022?", "gold": "M('CVX','Revenue',2022)", "unit": "USD"}
+{"id": "L13", "type": "lookup", "q": "Adobe FY2025 的营业利润是多少？", "gold": "M('ADBE','OperatingIncome',2025)", "unit": "USD"}
+{"id": "L14", "type": "lookup", "q": "Nike FY2024 的长期债务是多少？", "gold": "M('NKE','LongTermDebt',2024)", "unit": "USD"}
+{"id": "L15", "type": "lookup", "q": "Cisco FY2020 revenue?", "gold": "M('CSCO','Revenue',2020)", "unit": "USD"}
+{"id": "C01", "type": "calc", "q": "Apple 2024 财年营收比 2023 年增长了多少？", "gold": "(M('AAPL','Revenue',2024)/M('AAPL','Revenue',2023)-1)*100", "unit": "%"}
+{"id": "C02", "type": "calc", "q": "NVIDIA FY2025 营收同比增长率是多少？", "gold": "(M('NVDA','Revenue',2025)/M('NVDA','Revenue',2024)-1)*100", "unit": "%"}
+{"id": "C03", "type": "calc", "q": "What was Microsoft's net profit margin in fiscal 2025?", "gold": "M('MSFT','NetIncome',2025)/M('MSFT','Revenue',2025)*100", "unit": "%"}
+{"id": "C04", "type": "calc", "q": "Walmart FY2025 的毛利是多少？", "gold": "M('WMT','Revenue',2025)-M('WMT','CostOfRevenue',2025)", "unit": "USD"}
+{"id": "C05", "type": "calc", "q": "Amazon 2024 年的毛利是多少？", "gold": "M('AMZN','Revenue',2024)-M('AMZN','CostOfRevenue',2024)", "unit": "USD"}
+{"id": "C06", "type": "calc", "q": "2024 年可口可乐和百事可乐谁的净利率更高？高多少个百分点？", "gold": "(M('KO','NetIncome',2024)/M('KO','Revenue',2024)-M('PEP','NetIncome',2024)/M('PEP','Revenue',2024))*100", "unit": "%", "entity": ["可口可乐", "Coca-Cola", "KO"]}
+{"id": "C07", "type": "calc", "q": "Tesla 2024 年的自由现金流（经营现金流减资本开支）是多少？", "gold": "M('TSLA','OperatingCashFlow',2024)-M('TSLA','CapEx',2024)", "unit": "USD"}
+{"id": "C08", "type": "calc", "q": "What was Meta's long-term debt to stockholders' equity ratio at the end of 2024?", "gold": "M('META','LongTermDebt',2024)/M('META','StockholdersEquity',2024)", "unit": "ratio"}
+{"id": "C09", "type": "calc", "q": "Alphabet 2020 到 2024 年营收的年复合增长率（CAGR）是多少？", "gold": "((M('GOOGL','Revenue',2024)/M('GOOGL','Revenue',2020))**(1/4)-1)*100", "unit": "%"}
+{"id": "C10", "type": "calc", "q": "Intel 2024 年净利润比 2023 年减少了多少美元？", "gold": "M('INTC','NetIncome',2023)-M('INTC','NetIncome',2024)", "unit": "USD"}
+{"id": "C11", "type": "calc", "q": "Boeing 2024 年的营业利润率是多少？", "gold": "M('BA','OperatingIncome',2024)/M('BA','Revenue',2024)*100", "unit": "%"}
+{"id": "C12", "type": "calc", "q": "Costco FY2025 营收增长了百分之几？", "gold": "(M('COST','Revenue',2025)/M('COST','Revenue',2024)-1)*100", "unit": "%"}
+{"id": "C13", "type": "calc", "q": "What was Apple's return on equity (net income / stockholders' equity) in fiscal 2024?", "gold": "M('AAPL','NetIncome',2024)/M('AAPL','StockholdersEquity',2024)*100", "unit": "%"}
+{"id": "C14", "type": "calc", "q": "Apple、Microsoft、Alphabet 三家公司 2024 财年谁的营收最高？比第二名多多少？", "gold": "M('AAPL','Revenue',2024)-M('GOOGL','Revenue',2024)", "unit": "USD", "entity": ["Apple", "AAPL", "苹果"]}
+{"id": "C15", "type": "calc", "q": "Nike FY2025 营收相比 FY2024 变化了百分之几？", "gold": "(M('NKE','Revenue',2025)/M('NKE','Revenue',2024)-1)*100", "unit": "%"}
+{"id": "T01", "type": "text", "q": "根据 Apple FY2024 10-K，Apple 的生产主要外包到哪些国家和地区？", "gold_phrases": ["China mainland, India, Japan, South Korea, Taiwan and Vietnam"], "key_points": ["Manufacturing is performed mostly by outsourcing partners", "Located primarily in China mainland, India, Japan, South Korea, Taiwan and Vietnam"]}
+{"id": "T02", "type": "text", "q": "According to NVIDIA's FY2025 10-K, which foundries produce NVIDIA's semiconductor wafers?", "gold_phrases": ["TSMC"], "key_points": ["Taiwan Semiconductor Manufacturing Company (TSMC)", "Samsung"]}
+{"id": "T03", "type": "text", "q": "Costco 管理层如何解释 FY2025 净销售额的增长？", "gold_phrases": ["14,788"], "key_points": ["Net sales increased about 8%", "Mainly from comparable sales growth (about 6%)", "Shopping frequency up about 5% and average ticket up about 1%", "Sales at 24 net new warehouses"]}
+{"id": "T04", "type": "text", "q": "Tesla FY2024 10-K 中提到了哪些对关键人物的依赖风险？", "gold_phrases": ["Elon Musk"], "key_points": ["Highly dependent on Elon Musk (CEO / Technoking)", "Key employees are not bound by employment agreements for a specific term", "Need to attract and retain senior leadership and talent"]}
+{"id": "T05", "type": "text", "q": "How does Coca-Cola make money from its bottlers, according to its FY2024 10-K?", "gold_phrases": ["concentrates and syrups"], "key_points": ["Coca-Cola sells concentrates and syrups to bottling partners", "Bottlers manufacture, package and distribute finished beverages", "Pricing flexibility is limited in practice by competitive market conditions"]}
+{"id": "T06", "type": "text", "q": "Meta 的两个报告分部是什么？Reality Labs 主要在做什么？", "gold_phrases": ["Reality Labs"], "key_points": ["Two segments: Family of Apps (FoA) and Reality Labs (RL)", "Substantially all revenue comes from advertising in Family of Apps", "Reality Labs invests in long-term research for future products (AR/VR, metaverse, neural interfaces)"]}
+{"id": "T07", "type": "text", "q": "Walmart FY2025 10-K 中，汇率变化对公司有什么影响？", "gold_phrases": ["currency exchange"], "key_points": ["Unfavorable currency exchange rate fluctuations hurt reported results", "The Walmart International segment is most affected", "This also affects consolidated results"]}
+{"id": "T08", "type": "text", "q": "根据 Boeing FY2024 10-K，2024 年 1 月 Alaska Airlines 事故之后 FAA 采取了哪些措施？", "gold_phrases": ["Alaska Airlines"], "key_points": ["The FAA investigated Boeing's 737 quality control system, including Spirit AeroSystems", "The FAA increased oversight of Boeing's production and quality/safety management systems", "The FAA will not approve 737 production rate increases beyond 38 per month (or new lines) until Boeing meets quality and safety standards"]}
+{"id": "T09", "type": "text", "q": "Microsoft 在 FY2025 10-K 中说它的云业务有哪些规模经济（economies of scale）？", "gold_phrases": ["economies of scale"], "key_points": ["Large datacenters deploy computing at lower cost per unit", "Datacenters aggregate diverse demand, improving utilization", "Multi-tenancy lowers application maintenance labor costs"]}
+{"id": "T10", "type": "text", "q": "What sales channels does Nike use, according to its FY2025 10-K?", "gold_phrases": ["NIKE Direct"], "key_points": ["NIKE Direct: NIKE-owned retail stores and digital platforms", "Wholesale accounts: independent distributors, licensees and sales representatives"]}
