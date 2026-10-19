@@ -4,3 +4,5 @@ requests>=2.31      # 调用 SEC EDGAR 接口
 pandas>=2.0         # 数据清洗
 beautifulsoup4>=4.12
 lxml>=5.0
+fastapi>=0.115
+uvicorn>=0.30

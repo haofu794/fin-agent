@@ -6,6 +6,11 @@
 - **结构化数据**：SEC XBRL → SQLite，20 家公司 × 14 项指标 × FY2020–2025，共 1,567 个数字
 - **混合检索 RAG**：手写 BM25 + 向量检索，用 RRF 融合；40 份 10-K 切分为 3,999 块
 - **评测**：自建 60 题评测集 + LLM-as-judge，3 次运行平均准确率 **99.4%**，并做了 ablation 对比实验
+- **网页**：FastAPI 后端 + 原生 HTML/JS 前端，逐步流式显示推理过程；答案里每个查出来的数字都带勾稽标记，指向产生它的那一步
+
+![fin-agent 网页界面](docs/screenshot.png)
+
+*左边是 Agent 的推理过程，右边是答案。带红色 ✓ 的数字来自对应编号的工具调用，带下划线的编号可以点开查看引用的原文。*
 
 ---
 
@@ -150,8 +155,11 @@ python scripts/build_db.py        # SEC XBRL → data/finance.db（约 1 分钟�
 python scripts/build_filings.py   # 下载 10-K 原文并按 Item 切分（约 2 分钟）
 python scripts/build_index.py     # 切块 + embedding（约 1.5 分钟，OpenAI 费用约 0.04 美元）
 
-# 提问
+# 提问（命令行）
 python scripts/ask.py "Apple 2024 财年营收比 2023 年增长了多少？"
+
+# 提问（网页）：只监听本机 127.0.0.1，然后在浏览器打开 http://127.0.0.1:8000
+python web/app.py
 
 # 评测
 python evals/run_eval.py --set all --name my_run          # 60 题，约 1 分钟
@@ -181,6 +189,9 @@ fin-agent/
 │   ├── bm25.py         # 手写 BM25
 │   ├── rag.py          # 向量检索 + RRF 混合检索
 │   └── config.py       # 从 .env 读取配置
+├── web/
+│   ├── app.py          # FastAPI：/api/ask（一次性返回）、/api/ask/stream（SSE 逐步推送）、限流
+│   └── static/index.html  # 单页前端：推理步骤、勾稽标记、引用弹窗（无外部依赖）
 ├── scripts/            # 构建数据、提问、环境自检
 └── evals/              # 评测集、评分、汇总、检索 ablation
 ```
@@ -193,4 +204,5 @@ fin-agent/
 - **模型**：所有结果只针对 gpt-5.4-mini。下一步：换成本地 Qwen3（Ollama）重跑评测，对比大小模型。
 - **原文覆盖**：只索引了 FY2024–2025 的 Item 1 / 1A / 7。Intel、IBM、McDonald's、Chevron 的 10-K 结构不标准，按整篇存储（引用时没有 Item 信息）；IBM 的 MD&A 在年报附件里，没有收录。
 - **单位**：MD&A 原文里的金额通常以百万美元为单位，切块后单位说明可能不在同一块里，答案可能丢失单位。
-- **计划中**：MCP server 封装工具层；FastAPI + 网页展示答案、出处和推理过程。
+- **网页**：只在本机运行，没有部署。部署到公网需要先加身份验证和按用户限流，否则任何人都能消耗 API 额度。浏览器断开时，正在运行的那道题不会被取消（harness 没有中途取消的机制），最多跑完 8 步。
+- **计划中**：MCP server 封装工具层。

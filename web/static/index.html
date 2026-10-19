@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fin-agent</title>
+<style>
+  /* Design: an auditor's working paper. Numbers the agent looked up carry red tick marks that point
+     back to the step that produced them; cited passages open in place. System fonts only, so the page
+     renders the same without access to any font CDN. */
+  :root {
+    --paper: #EEF2F0;        /* ledger paper */
+    --sheet: #F8FAF8;        /* answer sheet, a step lighter than the paper */
+    --ink: #1D2B33;          /* slate ink */
+    --ink-soft: #55656E;
+    --rule: #C5D3CB;         /* ledger rule */
+    --red: #B8262C;          /* auditor's red pencil: tick marks and citations */
+    --blue: #2F5D8A;         /* blue pencil: tool calls */
+    --amber: #8A5A00;        /* harness warnings */
+    --amber-bg: #FBF1DC;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "Songti SC", "SimSun", Georgia, serif;
+    --sans: "Avenir Next", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #142028; --sheet: #1B2932; --ink: #E3EAE6; --ink-soft: #9DB0A8; --rule: #2F4450;
+      --red: #F07A7A; --blue: #8DB8E8; --amber: #E8B44F; --amber-bg: #2E2614;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #142028; --sheet: #1B2932; --ink: #E3EAE6; --ink-soft: #9DB0A8; --rule: #2F4450;
+    --red: #F07A7A; --blue: #8DB8E8; --amber: #E8B44F; --amber-bg: #2E2614;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.5 var(--sans);
+    /* faint ledger lines on the paper */
+    background-image: repeating-linear-gradient(to bottom, transparent 0 31px, color-mix(in srgb, var(--rule) 45%, transparent) 31px 32px);
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 16px 64px; }
+
+  /* ── header and question ── */
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font: 600 30px/1.1 var(--serif); margin: 0; letter-spacing: -0.01em; }
+  .model { font-size: 14px; color: var(--ink-soft); }
+  .lede { margin: 6px 0 24px; color: var(--ink-soft); max-width: 62ch; }
+
+  form { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+  textarea {
+    resize: vertical; min-height: 52px; max-height: 200px; padding: 13px 14px;
+    font: 17px/1.45 var(--sans); color: var(--ink); background: var(--sheet);
+    border: 1.5px solid var(--rule); border-radius: 6px;
+  }
+  textarea:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 25%, transparent); }
+  button.ask {
+    font: 600 16px var(--sans); padding: 0 26px; border-radius: 6px; border: 0; cursor: pointer;
+    background: var(--ink); color: var(--sheet);
+  }
+  button.ask:disabled { opacity: .55; cursor: progress; }
+  :focus-visible { outline: 2.5px solid var(--blue); outline-offset: 2px; }
+
+  .examples { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+  .examples button {
+    font: 14px/1.3 var(--sans); color: var(--ink); background: transparent; cursor: pointer;
+    border: 1px dashed var(--rule); border-radius: 4px; padding: 6px 10px; text-align: left;
+  }
+  .examples button:hover { border-color: var(--blue); color: var(--blue); }
+
+  /* ── two columns: work trail | answer sheet ── */
+  main { display: grid; gap: 28px; margin-top: 32px; }
+  @media (min-width: 900px) { main { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: start; } }
+  h2 { font: 600 15px/1.3 var(--sans); color: var(--ink-soft); margin: 0 0 10px; }
+
+  /* work trail: a numbered sequence, because it is one */
+  ol.trail { list-style: none; margin: 0; padding: 0; counter-reset: call; }
+  .trail > li { position: relative; padding: 10px 0 12px 40px; border-top: 1px solid var(--rule); }
+  .trail > li:last-child { border-bottom: 1px solid var(--rule); }
+  .trail > li.call { counter-increment: call; }
+  .trail > li.call::before {
+    content: counter(call); position: absolute; left: 0; top: 10px; width: 26px; height: 26px;
+    display: grid; place-items: center; border: 1.5px solid var(--blue); border-radius: 50%;
+    color: var(--blue); font: 600 13px var(--sans); font-variant-numeric: tabular-nums;
+  }
+  .trail > li.flash::before { background: var(--blue); color: var(--sheet); }
+  .tool { font: 600 15px var(--mono); color: var(--blue); }
+  .args { font: 13px/1.5 var(--mono); color: var(--ink-soft); word-break: break-word; }
+  .value { font: 600 22px/1.25 var(--serif); font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .meta { font-size: 13px; color: var(--ink-soft); margin-top: 2px; word-break: break-word; }
+  .err { color: var(--red); font-size: 14px; margin-top: 4px; }
+  .trail details { margin-top: 6px; font-size: 14px; }
+  .trail summary { cursor: pointer; color: var(--ink); }
+  .trail summary code { font: 13px var(--mono); color: var(--red); }
+  .trail details p { margin: 6px 0 4px; font: 14px/1.55 var(--serif); color: var(--ink-soft); white-space: pre-wrap; }
+  .trail > li.note { padding-left: 40px; color: var(--amber); background: var(--amber-bg); font-size: 14px; }
+  .trail > li.status { color: var(--ink-soft); font-size: 14px; }
+  .empty { color: var(--ink-soft); font-size: 15px; margin: 0; }
+
+  /* answer sheet */
+  .sheet { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 24px 28px 22px; }
+  .answer { font: 18px/1.65 var(--serif); max-width: 68ch; }
+  .answer p { margin: 0 0 .8em; }
+  .answer ul, .answer ol { margin: 0 0 .8em; padding-left: 1.3em; }
+  .answer h3 { font: 600 17px/1.4 var(--sans); margin: 1em 0 .3em; }
+  .answer code { font: .85em var(--mono); }
+  .answer strong { font-weight: 650; }
+  .stats { margin: 14px 0 0; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 14px; color: var(--ink-soft); }
+
+  /* the one memorable element: red tick marks on looked-up numbers */
+  .ticked { white-space: nowrap; }
+  a.tick {
+    color: var(--red); text-decoration: none; font: 700 11px var(--sans); vertical-align: super;
+    margin-left: 1px; padding: 0 2px;
+  }
+  a.tick::before { content: "\2713"; margin-right: 1px; }
+  a.tick:hover { text-decoration: underline; }
+  @media (prefers-reduced-motion: no-preference) {
+    .answer.fresh a.tick { animation: mark .5s ease-out both; animation-delay: calc(var(--i) * 70ms + 150ms); }
+    @keyframes mark { from { opacity: 0; transform: translateY(-3px) scale(1.6); } to { opacity: 1; transform: none; } }
+  }
+  button.cite {
+    font: 600 .8em var(--mono); color: var(--red); background: transparent; border: 0;
+    border-bottom: 1.5px solid var(--red); padding: 0 1px; cursor: pointer;
+  }
+  .legend { font-size: 13px; color: var(--ink-soft); margin: 10px 0 0; }
+  .legend .tick { vertical-align: baseline; }
+
+  dialog {
+    max-width: min(720px, calc(100vw - 32px)); border: 1px solid var(--rule); border-radius: 8px;
+    background: var(--sheet); color: var(--ink); padding: 22px 24px;
+  }
+  dialog::backdrop { background: rgba(20, 32, 40, .45); }
+  dialog h3 { font: 600 15px var(--mono); color: var(--red); margin: 0; }
+  dialog .sec { color: var(--ink-soft); font-size: 14px; margin: 2px 0 12px; }
+  dialog p { font: 16px/1.6 var(--serif); white-space: pre-wrap; margin: 0; max-height: 60vh; overflow: auto; }
+  dialog form { display: block; margin-top: 16px; text-align: right; }
+  dialog button { font: 600 14px var(--sans); padding: 8px 16px; border-radius: 6px; border: 1px solid var(--rule); background: transparent; color: var(--ink); cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>fin-agent</h1>
+    <span class="model" id="model"></span>
+  </header>
+  <p class="lede">Ask about the 10-K filings of 20 large US companies, fiscal years 2020–2025. Every number is looked up in the filings, and every claim about the text is cited.</p>
+
+  <form id="ask-form">
+    <textarea id="q" name="q" rows="1" aria-label="Question" maxlength="500" placeholder="For example: How much did Apple's revenue grow in fiscal 2024?" required></textarea>
+    <button class="ask" id="ask" type="submit">Ask</button>
+  </form>
+  <ul class="examples" id="examples" aria-label="Example questions"></ul>
+
+  <main>
+    <section aria-labelledby="trail-h">
+      <h2 id="trail-h">How the agent worked it out</h2>
+      <ol class="trail" id="trail" aria-live="polite"></ol>
+      <p class="empty" id="trail-empty">Each tool call appears here as it happens: database lookups, calculations and searches of the filing text.</p>
+    </section>
+    <section aria-labelledby="answer-h">
+      <h2 id="answer-h">Answer</h2>
+      <div class="sheet">
+        <div class="answer" id="answer" aria-live="polite"><p class="empty">Ask a question, or pick one of the examples above.</p></div>
+        <p class="stats" id="stats" hidden></p>
+        <p class="legend" id="legend" hidden><a class="tick" aria-hidden="true">n</a> marks a number taken from step n. Underlined codes open the cited passage.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="passage" aria-labelledby="passage-id">
+  <h3 id="passage-id"></h3>
+  <div class="sec" id="passage-sec"></div>
+  <p id="passage-text"></p>
+  <form method="dialog"><button>Close</button></form>
+</dialog>
+
+<script>
+const EXAMPLES = [
+  "Costco FY2025 营收增长了多少？管理层怎么解释增长原因？",
+  "Which had the higher net margin in 2024, Coca-Cola or PepsiCo?",
+  "Walmart FY2025 的毛利是多少？",
+  "According to NVIDIA's FY2025 10-K, which foundries make its chips?",
+  "NVIDIA 在 FY2023 的 10-K 里列出了哪些主要风险？",
+];
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ── state for one question ──
+let calls = [];        // [{n, tool, args, result}]
+let pendingNote = null; // a guardrail warning arrives before the call it refers to; show it after that call
+let passages = {};     // chunk_id -> {section, text}
+
+// ── trail rendering ──
+function argsText(tool, args) {
+  return Object.entries(args).map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join("  ");
+}
+
+function renderResult(tool, result) {
+  if (result && result.harness_warning) result = result.tool_result;
+  if (!result || typeof result !== "object") return `<div class="meta">${esc(result)}</div>`;
+  if (result.error) return `<div class="err">${esc(result.error)}</div>${result.hint ? `<div class="meta">${esc(result.hint)}</div>` : ""}`;
+  if (tool === "get_metric") {
+    return `<div class="value">${esc(result.display)}</div>
+            <div class="meta">${esc(result.period)}<br>10-K ${esc(result.source.accession)}, tag ${esc(result.source.xbrl_tag)}</div>`;
+  }
+  if (tool === "calculator") {
+    const r = Number(result.result);
+    return `<div class="value">${esc(Number.isInteger(r) ? r.toLocaleString("en-US") : r.toPrecision(8))}</div>`;
+  }
+  if (tool === "search_filings") {
+    return result.results.map((p) => {
+      passages[p.chunk_id] = { section: p.section, text: p.text };
+      return `<details><summary><code>${esc(p.chunk_id)}</code> ${esc(p.section)}</summary><p>${esc(p.text.replace(/^\[.*?\]\n/, ""))}</p></details>`;
+    }).join("");
+  }
+  if (tool === "list_companies") {
+    return `<div class="meta">${result.companies.length} companies, ${result.metrics.length} metrics, fiscal years ${esc(result.fiscal_years)}</div>`;
+  }
+  return "";
+}
+
+function setStatus(text) {
+  let li = $("trail").querySelector("li.status");
+  if (!text) { li?.remove(); return; }
+  if (!li) { li = document.createElement("li"); li.className = "status"; }
+  li.textContent = text;
+  $("trail").appendChild(li);   // always keep the status line last
+}
+
+function addCall(e) {
+  const n = calls.length + 1;
+  calls.push({ n, tool: e.tool, args: safeJSON(e.arguments), result: e.result });
+  const li = document.createElement("li");
+  li.className = "call"; li.id = `step-${n}`;
+  li.innerHTML = `<span class="tool">${esc(e.tool)}</span>
+    <div class="args">${esc(argsText(e.tool, safeJSON(e.arguments)))}</div>
+    ${renderResult(e.tool, e.result)}`;
+  $("trail").appendChild(li);
+  if (pendingNote) { addNote(pendingNote); pendingNote = null; }
+  setStatus("");
+}
+
+function addNote(text) {
+  const li = document.createElement("li");
+  li.className = "note"; li.textContent = text;
+  $("trail").appendChild(li);
+}
+
+function safeJSON(s) { try { return typeof s === "string" ? JSON.parse(s) : (s || {}); } catch { return {}; } }
+
+// ── answer rendering: small, safe Markdown subset (HTML is escaped first) ──
+function tickTargets() {
+  // Strings in the answer that came from a tool result -> the step that produced them.
+  const out = [];
+  for (const c of calls) {
+    let r = c.result; if (r && r.harness_warning) r = r.tool_result;
+    if (!r || r.error) continue;
+    if (c.tool === "get_metric" && r.display) {
+      out.push([r.display, c.n]);
+      out.push([r.display.replace(/ USD$| shares$/, ""), c.n]);
+    }
+    if (c.tool === "calculator" && typeof r.result === "number") {
+      const v = r.result, a = Math.abs(v);
+      if (a >= 1e9) out.push([(v / 1e9).toFixed(3) + "B", c.n]);
+      else if (a >= 1e6) out.push([(v / 1e6).toFixed(3) + "M", c.n]);
+      else { out.push([v.toFixed(2), c.n]); if (a >= 1) out.push([v.toFixed(1), c.n]); }
+    }
+  }
+  return out.sort((x, y) => y[0].length - x[0].length);   // longest first, so "391.035B USD" beats "391.035B"
+}
+
+function renderAnswer(md) {
+  const slots = [];
+  const hold = (html) => `\u0000${slots.push(html) - 1}\u0000`;
+  let s = esc(md);
+
+  // citations first: chunk ids become buttons that open the passage
+  s = s.replace(/\b([A-Z]{1,5}_20\d\d_(?:1A|1|7|FULL)_\d{3})\b/g, (m) => hold(`<button class="cite" type="button" data-chunk="${m}">${m}</button>`));
+
+  // tick marks: each looked-up number points to its step
+  let i = 0;
+  for (const [text, n] of tickTargets()) {
+    // a trailing "%" belongs to the number, so the tick goes after it
+    const pat = new RegExp(`(?<![\\d.])${esc(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])(?:\\s?%)?`, "g");
+    s = s.replace(pat, (m) => hold(`<span class="ticked">${m}<a class="tick" href="#step-${n}" style="--i:${i++}" aria-label="from step ${n}">${n}</a></span>`));
+  }
+
+  // block-level Markdown
+  const lines = s.split(/\n/);
+  let html = "", list = null, para = [];
+  const flush = () => { if (para.length) { html += `<p>${para.join("<br>")}</p>`; para = []; } };
+  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    let m;
+    if (!line.trim()) { flush(); closeList(); continue; }
+    if ((m = line.match(/^#{1,4}\s+(.*)/))) { flush(); closeList(); html += `<h3>${m[1]}</h3>`; continue; }
+    if ((m = line.match(/^\s*[-*•]\s+(.*)/))) { flush(); if (list !== "ul") { closeList(); html += "<ul>"; list = "ul"; } html += `<li>${m[1]}</li>`; continue; }
+    if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { flush(); if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; } html += `<li>${m[1]}</li>`; continue; }
+    closeList(); para.push(line);
+  }
+  flush(); closeList();
+
+  // inline Markdown
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  return html.replace(/\u0000(\d+)\u0000/g, (_, k) => slots[k]);
+}
+
+// ── streaming request ──
+async function ask(question) {
+  calls = []; passages = {}; pendingNote = null;
+  $("trail").innerHTML = ""; $("trail-empty").hidden = true;
+  $("answer").classList.remove("fresh");
+  $("answer").innerHTML = `<p class="empty">Working on it…</p>`;
+  $("stats").hidden = true; $("legend").hidden = true;
+  $("ask").disabled = true;
+
+  try {
+    const res = await fetch("/api/ask/stream", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(res.status === 429 ? body.detail : `The server returned ${res.status}. ${typeof body.detail === "string" ? body.detail : ""}`);
+    }
+    // Server-Sent Events over fetch: events are separated by a blank line
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let k;
+      while ((k = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, k); buf = buf.slice(k + 2);
+        const ev = (block.match(/^event: (.*)$/m) || [])[1];
+        const data = safeJSON((block.match(/^data: (.*)$/m) || [])[1]);
+        handle(ev, data);
+      }
+    }
+  } catch (err) {
+    setStatus("");
+    $("answer").innerHTML = `<p class="err">${esc(err.message)}</p>`;
+  } finally {
+    $("ask").disabled = false;
+  }
+}
+
+function handle(ev, d) {
+  if (ev === "model_call") setStatus(d.step === 1 ? "Reading the question…" : `Step ${d.step}: deciding what to do next…`);
+  else if (ev === "tool_call") addCall(d);
+  else if (ev === "guardrail") pendingNote = "Harness check on the step above: " + d.warning.replace(/^HARNESS WARNING: /, "");
+  else if (ev === "final") {
+    setStatus("");
+    Object.assign(passages, d.citations || {});
+    $("answer").innerHTML = renderAnswer(d.answer || "");
+    void $("answer").offsetWidth; $("answer").classList.add("fresh");
+    const calc = d.tool_calls === 1 ? "1 tool call" : `${d.tool_calls} tool calls`;
+    $("stats").textContent = `${d.steps} ${d.steps === 1 ? "step" : "steps"}, ${calc}, ${d.seconds} s` +
+      (d.stopped_reason === "max_steps" ? ". Stopped at the step limit, so the answer may be incomplete." : "");
+    $("stats").hidden = false;
+    $("legend").hidden = !$("answer").querySelector(".tick, .cite");
+  } else if (ev === "error") {
+    setStatus("");
+    $("answer").innerHTML = `<p class="err">The agent stopped with an error: ${esc(d.message)}</p>`;
+  }
+}
+
+// ── wiring ──
+$("ask-form").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q) ask(q); });
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("ask-form").requestSubmit(); } });
+for (const q of EXAMPLES) {
+  const li = document.createElement("li"), b = document.createElement("button");
+  b.type = "button"; b.textContent = q;
+  b.addEventListener("click", () => { $("q").value = q; ask(q); });
+  li.appendChild(b); $("examples").appendChild(li);
+}
+document.addEventListener("click", (e) => {
+  const cite = e.target.closest("button.cite");
+  if (cite) {
+    const p = passages[cite.dataset.chunk];
+    $("passage-id").textContent = cite.dataset.chunk;
+    $("passage-sec").textContent = p ? p.section : "";
+    $("passage-text").textContent = p ? p.text.replace(/^\[.*?\]\n/, "") : "This passage was not part of the retrieved results.";
+    $("passage").showModal();
+  }
+  const tick = e.target.closest("a.tick[href]");
+  if (tick) {
+    const li = document.querySelector(tick.getAttribute("href"));
+    if (li) { li.classList.add("flash"); setTimeout(() => li.classList.remove("flash"), 1200); }
+  }
+});
+fetch("/api/health").then((r) => r.json()).then((h) => { $("model").textContent = `Model: ${h.model}`; }).catch(() => {});
+</script>
+</body>
+</html>

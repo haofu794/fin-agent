@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -136,21 +137,36 @@ class Agent:
             kwargs["tools"] = self.tools
         return self.client.chat.completions.create(**kwargs).choices[0].message
 
-    def run(self, question: str, verbose: bool = True) -> AgentResult:
+    def run(self, question: str, verbose: bool = True,
+            on_event: Callable[[dict], None] | None = None) -> AgentResult:
+        """
+        Answer one question. `on_event`, if given, is called with every trace event as it happens
+        (plus a "model_call" event before each LLM call), so a caller such as the web server
+        can stream progress. It never changes the agent's behaviour.
+        """
         # Conversation history: the model is stateless, so the full history is resent every turn.
         messages = [{"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": question}]
         trace = []
         question_years = explicit_fiscal_years(question)
 
+        def notify(event: dict) -> None:
+            if on_event is not None:
+                on_event(event)
+
+        def record(event: dict) -> None:
+            trace.append(event)
+            notify(event)
+
         for step in range(1, self.max_steps + 1):
+            notify({"step": step, "type": "model_call"})   # progress only; not stored in the trace
             t0 = time.time()
             msg = self._call_model(messages)
             elapsed = round(time.time() - t0, 2)
 
             # ── Case A: no tool calls -> this is the final answer ──
             if not msg.tool_calls:
-                trace.append({"step": step, "type": "final_answer", "content": msg.content, "seconds": elapsed})
+                record({"step": step, "type": "final_answer", "content": msg.content, "seconds": elapsed})
                 return self._finish(question, msg.content, step, trace, "final_answer")
 
             # ── Case B: the model wants to call tools ──
@@ -169,9 +185,9 @@ class Agent:
                 if warning:
                     result = json.dumps({"harness_warning": warning, "tool_result": json.loads(result)},
                                         ensure_ascii=False)
-                    trace.append({"step": step, "type": "guardrail", "warning": warning})
+                    record({"step": step, "type": "guardrail", "warning": warning})
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-                trace.append({"step": step, "type": "tool_call", "tool": tc.function.name,
+                record({"step": step, "type": "tool_call", "tool": tc.function.name,
                               "arguments": tc.function.arguments, "result": result, "seconds": elapsed})
                 if verbose:
                     print(f"  [step {step}] {tc.function.name}({tc.function.arguments})")
@@ -182,7 +198,7 @@ class Agent:
                          "Step limit reached. Answer now using only the information above, "
                          "and say if anything is missing."})
         msg = self._call_model(messages, allow_tools=False)
-        trace.append({"step": self.max_steps + 1, "type": "forced_answer", "content": msg.content})
+        record({"step": self.max_steps + 1, "type": "forced_answer", "content": msg.content})
         return self._finish(question, msg.content, self.max_steps, trace, "max_steps")
 
     def _finish(self, question, answer, steps, trace, reason) -> AgentResult:
