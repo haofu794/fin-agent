@@ -1,8 +1,8 @@
 """
-M1：下载 20 家公司的数据 → 挑选数字 → 存进 data/finance.db
+M1: download data for 20 companies -> select values -> store in data/finance.db
 
-运行：python scripts/build_db.py
-第一次约 1 分钟（要下载）；之后读本地缓存，几秒钟。
+Run: python scripts/build_db.py
+About 1 minute the first time (downloads); a few seconds afterwards (local cache).
 """
 import sys
 from pathlib import Path
@@ -25,7 +25,7 @@ for ticker in COMPANIES:
     facts = company_facts(cik)
     gaap = facts["facts"].get("us-gaap", {})
     last_end = max(fiscal_year_ends(gaap))
-    upsert_company(conn, ticker, cik, facts["entityName"], last_end[5:])  # 例如 '09-28'
+    upsert_company(conn, ticker, cik, facts["entityName"], last_end[5:])  # e.g. '09-28'
     rows = select_values(ticker, facts, YEARS)
     for row in rows:
         upsert_financial(conn, row)

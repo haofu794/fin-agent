@@ -1,6 +1,7 @@
 """
-M3 第 1 步：下载 20 家公司 FY2024、FY2025 的 10-K，切成章节，存到 data/filings/*.json
-运行：python scripts/build_filings.py
+M3 step 1: download the FY2024 and FY2025 10-Ks of 20 companies, split them into sections,
+and save them to data/filings/*.json
+Run: python scripts/build_filings.py
 """
 import json
 import sys
@@ -32,7 +33,7 @@ for ticker in COMPANIES:
             continue
         lens = {k: len(doc["sections"].get(k, {}).get("text", "")) for k in ITEMS}
         for k, n in lens.items():
-            if n < 3000:   # 少于 3000 字符很可能切错了（只切到了目录里那一行，或者只有一句"见附件"）
+            if n < 3000:   # under 3,000 chars is probably a bad split (only a TOC line, or "see exhibit")
                 problems.append(f"{ticker} FY{fy} Item {k}: 只有 {n} 字符")
         print(f"{ticker:5} FY{fy}  " + "  ".join(f"Item {k}: {n:>7,}" for k, n in lens.items()))
 

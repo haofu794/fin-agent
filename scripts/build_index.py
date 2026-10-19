@@ -1,7 +1,7 @@
 """
-M3：data/filings/*.json → 切块 → embedding → data/index/
-运行：python scripts/build_index.py
-OpenAI text-embedding-3-small：约 200 万 token，费用约 0.04 美元，约 1–2 分钟。
+M3: data/filings/*.json -> chunks -> embeddings -> data/index/
+Run: python scripts/build_index.py
+With OpenAI text-embedding-3-small: ~2M tokens, ~USD 0.04, ~1-2 minutes.
 """
 import json
 import sys

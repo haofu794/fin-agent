@@ -1,4 +1,4 @@
-"""M2 练习：不经过模型，直接调用工具，看看每种情况返回什么。"""
+"""M2 exercise: call the tools directly (no model) and inspect what each case returns."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))

@@ -1,11 +1,12 @@
 """
-M1 数据层：SQLite 表结构与读写。
+M1 data layer: SQLite schema and writes.
 
-设计要点（详见学习笔记）：
-- 长表（long format）：一行 = 一家公司 × 一个指标 × 一个财年
-  → get_metric 能用参数化 SQL 查询，避免拼接列名带来的 SQL injection。
-- 主键 (ticker, metric, fiscal_year)：同一个数只能存一份，插入前必须先选定一条记录。
-- value 存原始值（美元），换算成 B / M 留给显示层。
+Design notes:
+- Long format: one row = one company x one metric x one fiscal year,
+  so get_metric can use fully parameterised SQL (no column names built from strings -> no SQL injection).
+- Primary key (ticker, metric, fiscal_year): each value is stored once, so a single record
+  must be chosen before inserting.
+- `value` stores the raw figure (USD); scaling to B / M is left to the display layer.
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ CREATE TABLE IF NOT EXISTS financials (
 
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row  # 让查询结果可以用列名访问：row["value"]
+    conn.row_factory = sqlite3.Row  # access columns by name: row["value"]
     conn.executescript(SCHEMA)
     return conn
 
@@ -52,7 +53,7 @@ def upsert_company(conn, ticker, cik, name, fiscal_year_end=None):
 
 
 def upsert_financial(conn, row: dict):
-    """插入一条指标；主键冲突时覆盖（重新下载数据时用新值替换旧值）。"""
+    """Insert one metric value; on primary-key conflict, replace it (new downloads overwrite old values)."""
     conn.execute(
         """INSERT OR REPLACE INTO financials
            (ticker, metric, fiscal_year, value, unit, period_start, period_end,

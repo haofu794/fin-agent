@@ -1,11 +1,11 @@
 """
-M3 第 1 步：下载 10-K 原文（HTML），转成纯文字，按 Item（章节）切开。
+M3 step 1: download 10-K filings (HTML), convert them to plain text, and split them into Items (sections).
 
-流程：
-1. submissions 接口 → 找到某家公司某个财年的 10-K 是哪个文件
-2. 下载这个 HTML 文件（缓存到 data/raw/10k/）
-3. HTML → 纯文字（去掉标签、表格）
-4. 找到 "Item 1." "Item 1A." "Item 7." 这些标题，把文字切成章节
+Pipeline:
+1. submissions API -> find which file is the 10-K for a given company and fiscal year
+2. download that HTML file (cached in data/raw/10k/)
+3. HTML -> plain text (strip tags and numeric tables)
+4. find headings such as "Item 1.", "Item 1A.", "Item 7." and split the text into sections
 """
 from __future__ import annotations
 
@@ -19,18 +19,19 @@ from .sec import _get_json, _get_text
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
-# 我们要的章节。Item 8（财务报表）不要：里面的数字已经在 SQLite 里了，而且大部分是表格。
+# Sections we keep. Item 8 (financial statements) is skipped: its numbers are already in SQLite
+# and it is mostly tables.
 ITEMS = {
     "1":  "Business",
     "1A": "Risk Factors",
     "7":  "Management's Discussion and Analysis (MD&A)",
 }
-MIN_SECTION_CHARS = 3000  # 少于这个长度，基本可以肯定是切错了（只切到目录或一句"见第 X 页"）
+MIN_SECTION_CHARS = 3000  # anything shorter is almost certainly a bad split (a TOC line or "see page X")
 TITLES = {**ITEMS, "FULL": "Full document (standard Items not detected)"}
 
 
 def find_10k(cik: int, fiscal_year: int) -> dict | None:
-    """在这家公司提交过的所有文件里，找到 reportDate（财年最后一天）在 fiscal_year 的那份 10-K。"""
+    """Among all of the company's filings, find the 10-K whose reportDate (fiscal year end) falls in fiscal_year."""
     raw = get_settings().data_dir / "raw"
     sub = _get_json(f"https://data.sec.gov/submissions/CIK{cik:010d}.json", raw / f"submissions_{cik}.json")
     r = sub["filings"]["recent"]
@@ -46,32 +47,34 @@ def html_to_text(html: str) -> str:
     soup = BeautifulSoup(html, "lxml")
     for t in soup(["script", "style"]):
         t.decompose()
-    # 表格：只删"数字为主"的（财务数据表）。
-    # 不能全删：很多公司把章节标题放在表格里（一格 "Item 7."，一格标题），全删会连标题一起丢掉。
+    # Tables: remove only mostly-numeric ones (financial data tables).
+    # Removing all tables is wrong: many filers put section headings in a table
+    # (one cell "Item 7.", one cell with the title), so the headings would be lost too.
     for t in soup.find_all("table"):
         chars = [c for c in t.get_text() if not c.isspace()]
         if chars and sum(c.isdigit() or c in "$,.%()-—" for c in chars) / len(chars) > 0.4:
             t.decompose()
-    # 隐藏的 XBRL 元数据块（ix:header）也要去掉，否则文字开头会有一大堆标签名
+    # Also remove hidden inline-XBRL metadata (ix:header); otherwise the text starts with a pile of tag names.
     for t in soup.find_all(style=re.compile(r"display:\s*none")):
         t.decompose()
     text = soup.get_text("\n")
-    text = text.replace("\xa0", " ")                 # 不换行空格 → 普通空格
+    text = text.replace("\xa0", " ")                 # non-breaking space -> normal space
     text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n\s*\n+", "\n\n", text)         # 多个空行 → 一个空行
+    text = re.sub(r"\n\s*\n+", "\n\n", text)         # collapse multiple blank lines
     return text.strip()
 
 
-# 标题的样子："Item 1A." / "ITEM 1A:" / "Item 1A — Risk Factors"，必须在一行的开头
+# Heading formats: "Item 1A." / "ITEM 1A:" / "Item 1A — Risk Factors"; must be at the start of a line
 _HEADING = re.compile(r"^\s*item\s+(\d{1,2}[A-C]?)\s*[.:\-—–]", re.IGNORECASE | re.MULTILINE)
 
 
 def split_items(text: str) -> dict[str, str]:
     """
-    把全文切成章节。难点：每个标题会出现两次——
-    一次在开头的目录（Table of Contents）里，一次在正文里。
-    目录里的"章节"只有一行字（下一行就是下一个标题），正文里的有几千字。
-    所以：对每个 Item，在它出现的所有位置里，选"到下一个标题之间文字最长"的那一个。
+    Split the full text into sections. The difficulty: every heading appears twice,
+    once in the table of contents and once in the body.
+    The TOC "section" is a single line (the next heading follows immediately), while the body
+    section runs to thousands of characters.
+    So for each Item, among all its occurrences, pick the one with the longest text before the next heading.
     """
     marks = [(m.start(), m.group(1).upper()) for m in _HEADING.finditer(text)]
     best: dict[str, str] = {}
@@ -94,12 +97,12 @@ def load_10k_sections(ticker: str, cik: int, fiscal_year: int) -> dict | None:
     text = html_to_text(html)
     sections = split_items(text)
     if any(len(sections.get(k, "")) < MIN_SECTION_CHARS for k in ITEMS):
-        # 切分失败（有章节缺失或太短）。常见原因：
-        #   Intel：Item 下面只有"见第 31–46 页"，正文按自己的结构编排；
-        #   IBM：MD&A 放在另一份文件（年报附件）里；
-        #   McDonald's / Chevron：标题格式特殊，切出来的内容对不上。
-        # 退而求其次：整篇作为一个"章节"。检索照样能用，只是引用时说不出是哪个 Item。
-        # 宁可"没有章节名"，也不要"章节名是错的"。
+        # Splitting failed (a section is missing or too short). Typical causes:
+        #   Intel: each Item only says "see pages 31-46"; the body follows its own structure.
+        #   IBM: MD&A lives in a separate document (an annual-report exhibit).
+        #   McDonald's / Chevron: unusual heading formats produce mismatched sections.
+        # Fallback: store the whole document as one "section". Retrieval still works,
+        # but citations cannot name the Item. No section label is better than a wrong one.
         sections = {"FULL": text}
     return {"ticker": ticker, "fiscal_year": fiscal_year, **info,
             "sections": {k: {"title": TITLES[k], "text": v} for k, v in sections.items()}}

@@ -1,4 +1,4 @@
-"""向 Agent 提一个问题。用法：python scripts/ask.py "Apple 2024 财年营收比 2023 年增长了多少？" """
+"""Ask the agent a question. Usage: python scripts/ask.py "How much did Apple's FY2024 revenue grow vs FY2023?" """
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))

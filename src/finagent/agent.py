@@ -1,11 +1,12 @@
 """
-M4：手写的 Agent harness。
+M4: hand-written agent harness.
 
-核心就是一个循环：
-    把对话历史发给模型
-    → 模型要用工具？ 是 → 执行工具，把结果加进历史，回到开头
-                     否 → 它给出的就是最终答案，结束
-同时负责：最多 MAX_STEPS 步、错误回传、记录 trace。
+The core is a single loop:
+    send the conversation history to the model
+    -> does the model want to call a tool?
+         yes -> run the tool, append the result to the history, loop again
+         no  -> its reply is the final answer; stop
+The harness also enforces a MAX_STEPS limit, feeds tool errors back to the model, and records a trace.
 """
 from __future__ import annotations
 
@@ -22,11 +23,12 @@ from .config import PROJECT_ROOT, get_settings
 from .metrics import YEARS
 from .tools import TOOL_SCHEMAS, run_tool
 
-FILING_YEARS = (2024, 2025)  # 与 scripts/build_filings.py 保持一致
+FILING_YEARS = (2024, 2025)  # keep in sync with scripts/build_filings.py
 
 MAX_STEPS = 8
 
-# 数据范围从代码里的常量生成，而不是手写在 prompt 里：以后加年份，prompt 自动跟着变
+# The data scope is generated from code constants rather than hard-coded in the prompt,
+# so the prompt stays correct when years are added.
 DATA_SCOPE = (f"Financial metrics are available for fiscal years {YEARS.start}-{YEARS.stop - 1}. "
               f"10-K text is indexed only for fiscal years {FILING_YEARS[0]} and {FILING_YEARS[-1]}. "
               f"'Latest' or 'most recent fiscal year' means FY{YEARS.stop - 1}.")
@@ -64,16 +66,20 @@ Sources for text passages: the chunk_id of every passage you used (e.g. AAPL_202
 Answer in the same language as the question."""
 
 
-# 用户明确写出的财年："FY2023" "fiscal year 2023" "fiscal 2023" "2023 财年"
+# Explicit fiscal-year mentions: "FY2023", "fiscal year 2023", "fiscal 2023", "2023 财年" (Chinese for "fiscal year 2023")
 _FY_PATTERNS = [r"\bFY\s?(20\d\d)\b", r"\bfiscal(?:\s+year)?\s+(20\d\d)\b", r"(20\d\d)\s*财年"]
 
 
 def explicit_fiscal_years(question: str) -> set[int]:
     """
-    只有问题里出现了明确的财年写法（FY2023 / fiscal year 2023 / 2023 财年），guardrail 才启用；
-    启用后，问题里出现的所有年份都算"用户提到的年份"。
-    例："Apple 2024 财年营收比 2023 年增长了多少" → {2023, 2024}（只认 {2024} 的话，查 2023 时会误报）
-         "2020–2025 年间哪一年营收最高"      → 没有明确财年写法 → 不启用（否则查 2021–2024 时会误报）
+    The guardrail is enabled only when the question contains an explicit fiscal-year mention
+    (FY2023 / fiscal year 2023 / 2023 财年). Once enabled, every year in the question counts as
+    a year the user asked about.
+    Examples:
+      "How much did Apple's FY2024 revenue grow vs 2023?" -> {2023, 2024}
+          (recognising only {2024} would raise a false alarm when the agent looks up 2023)
+      "Which year in 2020-2025 had the highest revenue?" -> no explicit fiscal-year mention -> disabled
+          (otherwise looking up 2021-2024 would raise false alarms)
     """
     if not any(re.search(p, question, re.IGNORECASE) for p in _FY_PATTERNS):
         return set()
@@ -82,8 +88,10 @@ def explicit_fiscal_years(question: str) -> set[int]:
 
 def year_guard(question_years: set[int], arguments: str) -> str | None:
     """
-    Guardrail：用户明确问了 FY2023，工具却用了 fiscal_year=2024 → 返回一段警告，附在工具结果后面。
-    只在用户"明确写出财年"时才检查；"2020–2025 年间"这类范围问题不受影响。
+    Guardrail: if the user explicitly asked about FY2023 but a tool call used fiscal_year=2024,
+    return a warning that is attached to the tool result.
+    Only active when the user wrote an explicit fiscal year; range questions such as
+    "between 2020 and 2025" are not affected.
     """
     if not question_years:
         return None
@@ -91,7 +99,8 @@ def year_guard(question_years: set[int], arguments: str) -> str | None:
         fy = json.loads(arguments).get("fiscal_year")
     except (json.JSONDecodeError, AttributeError):
         return None
-    # 允许"前一年"：增长率、同比这类问题必须查上一年做比较（"NVIDIA FY2025 营收同比增长" 要查 FY2024）
+    # Also allow the previous year: growth / year-over-year questions must look it up
+    # (e.g. "NVIDIA FY2025 revenue growth" needs FY2024).
     allowed = question_years | {y - 1 for y in question_years}
     if fy is None or int(fy) in allowed:
         return None
@@ -106,7 +115,7 @@ class AgentResult:
     answer: str
     steps: int
     trace: list = field(default_factory=list)
-    stopped_reason: str = "final_answer"   # 或 "max_steps"
+    stopped_reason: str = "final_answer"   # or "max_steps"
 
 
 class Agent:
@@ -117,8 +126,8 @@ class Agent:
         self.model = model or s.llm_model
         self.max_steps = max_steps
         self.log = log
-        self.system_prompt = system_prompt or SYSTEM_PROMPT   # ablation 时可以换一份 prompt
-        # tool_names=None → 全部工具；做 ablation 时可以去掉某个工具（例如不给 calculator）
+        self.system_prompt = system_prompt or SYSTEM_PROMPT   # can be swapped out for ablations
+        # tool_names=None -> all tools; ablations can remove one (e.g. no calculator)
         self.tools = [t for t in TOOL_SCHEMAS if tool_names is None or t["function"]["name"] in tool_names]
 
     def _call_model(self, messages, allow_tools: bool = True):
@@ -128,7 +137,7 @@ class Agent:
         return self.client.chat.completions.create(**kwargs).choices[0].message
 
     def run(self, question: str, verbose: bool = True) -> AgentResult:
-        # 对话历史：模型没有记忆，每一轮都要把完整的历史重新发给它
+        # Conversation history: the model is stateless, so the full history is resent every turn.
         messages = [{"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": question}]
         trace = []
@@ -139,22 +148,23 @@ class Agent:
             msg = self._call_model(messages)
             elapsed = round(time.time() - t0, 2)
 
-            # ── 情况 A：模型没有要用工具 → 这就是最终答案 ──
+            # ── Case A: no tool calls -> this is the final answer ──
             if not msg.tool_calls:
                 trace.append({"step": step, "type": "final_answer", "content": msg.content, "seconds": elapsed})
                 return self._finish(question, msg.content, step, trace, "final_answer")
 
-            # ── 情况 B：模型要用工具 ──
-            # 先把模型的"纸条"原样加进历史（否则下一轮它不知道自己调用过什么）
+            # ── Case B: the model wants to call tools ──
+            # Append the model's tool-call message to the history first;
+            # otherwise next turn it would see results without knowing which calls produced them.
             messages.append({
                 "role": "assistant", "content": msg.content,
                 "tool_calls": [{"id": tc.id, "type": "function",
                                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                                for tc in msg.tool_calls],
             })
-            # 模型可能一次写好几张纸条（例如同时查 2023 和 2024），逐张执行
+            # The model may issue several calls at once (e.g. 2023 and 2024 together); run each one.
             for tc in msg.tool_calls:
-                result = run_tool(tc.function.name, tc.function.arguments)   # 出错也只是返回提示，不会崩
+                result = run_tool(tc.function.name, tc.function.arguments)   # errors come back as hints, never raise
                 warning = year_guard(question_years, tc.function.arguments)
                 if warning:
                     result = json.dumps({"harness_warning": warning, "tool_result": json.loads(result)},
@@ -167,7 +177,7 @@ class Agent:
                     print(f"  [step {step}] {tc.function.name}({tc.function.arguments})")
                     print(f"           → {result[:150]}")
 
-        # ── 走完 MAX_STEPS 还没结束：不再给工具，强制它根据已有信息作答 ──
+        # ── MAX_STEPS reached: withhold tools and force an answer from what has been gathered ──
         messages.append({"role": "user", "content":
                          "Step limit reached. Answer now using only the information above, "
                          "and say if anything is missing."})
@@ -178,7 +188,7 @@ class Agent:
     def _finish(self, question, answer, steps, trace, reason) -> AgentResult:
         if not self.log:
             return AgentResult(answer=answer, steps=steps, trace=trace, stopped_reason=reason)
-        # 每次运行都存一份 trace 到 logs/，方便调试和 M5 评测
+        # Save a trace of every run to logs/ for debugging and evaluation (M5).
         log_dir = PROJECT_ROOT / "logs"
         log_dir.mkdir(exist_ok=True)
         path = log_dir / f"trace_{datetime.now():%Y%m%d_%H%M%S_%f}.json"

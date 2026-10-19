@@ -1,10 +1,11 @@
 """
-集中管理所有配置。
+Central configuration.
 
-为什么这样设计：
-1. API key 只写在 .env 里，不出现在代码中 → 代码可以放心上传到 GitHub。
-2. 所有模块都通过 get_settings() 读取配置 → 想换模型（OpenAI / DeepSeek 等）只改 .env，不改代码。
-3. 用 frozen dataclass → 配置读取后不能被意外修改。
+Why it is designed this way:
+1. API keys live only in .env, never in code, so the code can be published on GitHub safely.
+2. Every module reads settings through get_settings(), so switching models (OpenAI, DeepSeek, local, ...)
+   only requires editing .env.
+3. A frozen dataclass prevents settings from being modified by accident after loading.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# 项目根目录：本文件在 src/finagent/config.py，往上两级就是 fin-agent/
+# Project root: this file is src/finagent/config.py, so two levels up is fin-agent/
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
 

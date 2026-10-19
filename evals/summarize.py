@@ -1,7 +1,7 @@
 """
-把多次运行的结果汇总成对比表。
-用法：python evals/summarize.py final abl_bm25 abl_vector abl_nocalc
-每个名字会匹配 evals/results/<名字>_1.json、_2.json、_3.json ……
+Summarise repeated runs into a comparison table.
+Usage: python evals/summarize.py final abl_bm25 abl_vector abl_nocalc
+Each name matches evals/results/<name>_1.json, _2.json, _3.json, ...
 """
 import json
 import statistics

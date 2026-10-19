@@ -1,11 +1,13 @@
 """
-M3 第 2 步：把章节切成小块（chunk）。
+M3 step 2: split sections into chunks.
 
-规则：
-- 每块最多 MAX_WORDS 个英文单词（≈ 500 tokens；英文里 1 个词平均约 1.3 个 token）。
-- 按段落装箱：一段一段往块里放，放不下了就开新块 → 尽量不把一句话从中间切断。
-- 相邻两块重叠 OVERLAP_WORDS 个词 → 一句关键的话正好落在边界上时，两块里都能看到它的上下文。
-- 每块开头加一行"标签"：公司、财年、章节 → 块被单独拿出来时，也知道它讲的是谁。
+Rules:
+- At most MAX_WORDS English words per chunk (~500 tokens; one English word averages ~1.3 tokens).
+- Pack whole paragraphs: add paragraphs until the next one would not fit, then start a new chunk,
+  so sentences are rarely cut in the middle.
+- Consecutive chunks overlap by OVERLAP_WORDS words, so a key sentence on a boundary keeps its context in both.
+- Each chunk starts with a header line (company, fiscal year, section), so a chunk retrieved on its own
+  still says which company it is about.
 """
 from __future__ import annotations
 
@@ -16,7 +18,7 @@ OVERLAP_WORDS = 40
 
 
 def _split_long(paragraph: str) -> list[str]:
-    """极少数段落本身就超过 MAX_WORDS：按句子再切。"""
+    """A few paragraphs exceed MAX_WORDS on their own: split them by sentence."""
     sentences = re.split(r"(?<=[.!?])\s+", paragraph)
     out, cur = [], []
     for s in sentences:
@@ -25,7 +27,7 @@ def _split_long(paragraph: str) -> list[str]:
         cur.append(s)
     if cur:
         out.append(" ".join(cur))
-    # 连句子都超长（例如没有标点的长列表）：硬切
+    # Even a single sentence may be too long (e.g. a long list without punctuation): hard split.
     final = []
     for piece in out:
         w = piece.split()
@@ -36,8 +38,8 @@ def _split_long(paragraph: str) -> list[str]:
 def chunk_text(text: str) -> list[str]:
     paragraphs = []
     for p in re.split(r"\n\s*\n", text):
-        p = " ".join(p.split())          # 段落内部的换行、多余空格合并
-        if len(p.split()) < 3:           # 只有一两个词的"段落"多半是页码、页眉，跳过
+        p = " ".join(p.split())          # collapse line breaks and extra spaces inside the paragraph
+        if len(p.split()) < 3:           # one- or two-word "paragraphs" are usually page numbers or headers
             continue
         paragraphs += _split_long(p) if len(p.split()) > MAX_WORDS else [p]
 
@@ -45,7 +47,7 @@ def chunk_text(text: str) -> list[str]:
     for p in paragraphs:
         if cur and len(" ".join(cur + [p]).split()) > MAX_WORDS:
             chunks.append(" ".join(cur))
-            tail = " ".join(cur).split()[-OVERLAP_WORDS:]   # 上一块的最后 40 个词，作为下一块的开头
+            tail = " ".join(cur).split()[-OVERLAP_WORDS:]   # last 40 words of the previous chunk open the next one
             cur = [" ".join(tail)]
         cur.append(p)
     if cur:
@@ -54,7 +56,7 @@ def chunk_text(text: str) -> list[str]:
 
 
 def chunk_filing(doc: dict) -> list[dict]:
-    """一份 10-K（filings.py 的输出）→ 一组带出处信息的小块。"""
+    """One 10-K (output of filings.py) -> a list of chunks with source metadata."""
     out = []
     for item, sec in doc["sections"].items():
         label = "Full 10-K" if item == "FULL" else f"Item {item} {sec['title']}"

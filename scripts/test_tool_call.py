@@ -1,8 +1,8 @@
 """
-工具调用冒烟测试：确认当前模型会“主动要求调用工具”，而不是自己瞎编答案。
-这是 Agent 能工作的前提——不支持 tool calling 的模型做不了 Agent。
+Tool-calling smoke test: check that the configured model asks to call a tool instead of making up an answer.
+This is a prerequisite for the agent: a model without tool calling cannot drive it.
 
-用法：python scripts/test_tool_call.py
+Usage: python scripts/test_tool_call.py
 """
 import json
 import sys
@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from openai import OpenAI
 from finagent.config import get_settings
 
-# 一个假工具：查询公司营收。我们只想看模型会不会正确地“请求调用”它。
+# A fake tool that looks up company revenue. We only check whether the model requests it correctly.
 TOOLS = [{
     "type": "function",
     "function": {

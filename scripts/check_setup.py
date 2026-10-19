@@ -1,11 +1,11 @@
 """
-环境自检：一次性确认 Python 版本、依赖包、.env 配置、SEC 网络、LLM API 都正常。
-用法（在 fin-agent 目录下）：python scripts/check_setup.py
+Environment self-check: Python version, dependencies, .env settings, SEC connectivity and LLM API, in one go.
+Usage (from the fin-agent directory): python scripts/check_setup.py
 """
 import sys
 from pathlib import Path
 
-# 让脚本能 import src/ 下的包
+# make the package under src/ importable from scripts
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 OK, FAIL = "✅", "❌"
@@ -16,7 +16,7 @@ def check(name, fn):
         detail = fn()
         print(f"{OK} {name}" + (f"：{detail}" if detail else ""))
         return True
-    except Exception as e:  # 自检脚本里捕获所有异常是合理的：我们只想报告，不想中断
+    except Exception as e:  # catching everything is fine in a self-check: we want to report, not abort
         print(f"{FAIL} {name}：{e}")
         return False
 

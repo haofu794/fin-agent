@@ -1,9 +1,9 @@
 """
-M3 第 4 步：混合检索 = BM25（关键词）+ 向量（语义），用 RRF 合并。
+M3 step 4: hybrid retrieval = BM25 (keywords) + vector search (semantics), fused with RRF.
 
-索引文件（scripts/build_index.py 生成）：
-  data/index/chunks.json      所有块的文字和出处
-  data/index/embeddings.npy   每块一个向量，形状 (块数, 1536)，已归一化成长度 1
+Index files (built by scripts/build_index.py):
+  data/index/chunks.json      text and source metadata of every chunk
+  data/index/embeddings.npy   one vector per chunk, shape (n_chunks, 1536), normalised to unit length
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from openai import OpenAI
 from .bm25 import BM25
 from .config import get_settings
 
-RRF_K = 60  # RRF 公式里的常数，原论文推荐值
+RRF_K = 60  # constant in the RRF formula; value recommended by the original paper (Cormack et al., 2009)
 
 
 def index_dir():
@@ -24,11 +24,11 @@ def index_dir():
 
 
 def embed(texts: list[str], batch_size: int = 256) -> np.ndarray:
-    """文字 → 向量（每个向量都归一化成长度 1，这样"点积"就等于"余弦相似度"）。"""
+    """Text -> vectors, each normalised to unit length so that the dot product equals cosine similarity."""
     s = get_settings()
     client = OpenAI(api_key=s.llm_api_key, base_url=s.llm_base_url)
     vecs = []
-    for i in range(0, len(texts), batch_size):   # 分批发送：一次请求能带的文字有上限
+    for i in range(0, len(texts), batch_size):   # send in batches: each request has an input-size limit
         resp = client.embeddings.create(model=s.embed_model, input=texts[i:i + batch_size])
         vecs += [d.embedding for d in resp.data]
     v = np.array(vecs, dtype=np.float32)
@@ -49,7 +49,7 @@ class HybridIndex:
 
     def search(self, query: str, ticker=None, fiscal_year=None, top_k: int = 5,
                mode: str = "hybrid", pool: int = 50) -> list[dict]:
-        """mode: "bm25" / "vector" / "hybrid"。保留三种模式，是为了 M5 做对比实验（ablation）。"""
+        """mode: "bm25" / "vector" / "hybrid". All three are kept so evaluation (M5) can run ablations."""
         cand = self._candidates(ticker, fiscal_year)
         if not cand:
             return []
@@ -58,11 +58,11 @@ class HybridIndex:
             rankings.append([i for i, _ in self.bm25.search(query, cand, top_k=pool)])
         if mode in ("vector", "hybrid"):
             q = embed([query])[0]
-            sims = self.vectors[cand] @ q                      # 余弦相似度
+            sims = self.vectors[cand] @ q                      # cosine similarity
             order = np.argsort(-sims)[:pool]
             rankings.append([cand[j] for j in order])
 
-        # RRF：每个块的分数 = Σ 1 / (60 + 它在每个排名里的名次)
+        # RRF: score of a chunk = sum over rankings of 1 / (60 + its rank in that ranking)
         fused: dict[int, float] = {}
         for ranking in rankings:
             for rank, i in enumerate(ranking, start=1):
@@ -73,5 +73,5 @@ class HybridIndex:
 
 @lru_cache(maxsize=1)
 def get_index() -> HybridIndex:
-    """索引只加载一次（读文件 + 建 BM25 要几秒），之后每次检索都复用。"""
+    """Load the index once (reading files + building BM25 takes a few seconds) and reuse it for every search."""
     return HybridIndex()

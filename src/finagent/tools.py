@@ -1,16 +1,16 @@
 """
-M2 工具层：模型可以调用的工具。
+M2 tool layer: the tools the model can call.
 
-每个工具由两部分组成：
-1. schema（说明书）：发给模型看的 JSON，告诉它"有这个工具、干什么用、要传哪些参数"。
-2. 实现（Python 函数）：harness 收到模型的调用请求后，真正去执行的代码。
+Each tool has two parts:
+1. A schema: JSON sent to the model describing what the tool does and which arguments it takes.
+2. An implementation: the Python function the harness runs when the model calls the tool.
 
-设计原则：
-- 工具出错时不抛异常，而是返回 {"error": ..., "hint": ...}。
-  原因：这个结果会被发回给模型，模型看到错误提示后可以自己改正（比如把指标名拼对）。
-  如果直接抛异常，整个程序就崩了，模型根本没有机会改正。
-- 数据库用只读模式打开：即使出 bug，也不可能修改或删除数据。
-- 所有返回值都是 JSON 字符串：模型只能读文字。
+Design principles:
+- Tools never raise; on failure they return {"error": ..., "hint": ...}.
+  The result is sent back to the model, which can then correct itself (e.g. fix a misspelled metric).
+  Raising would crash the run and give the model no chance to recover.
+- The database is opened read-only, so even a bug cannot modify or delete data.
+- Every tool returns a JSON string, because the model can only read text.
 """
 from __future__ import annotations
 
@@ -23,18 +23,18 @@ from .config import get_settings
 from .metrics import METRICS, YEARS
 
 
-# ──────────────────────────── 数据库（只读） ────────────────────────────
+# ──────────────────────────── Database (read-only) ────────────────────────────
 
 def _connect_readonly() -> sqlite3.Connection:
     path = get_settings().db_path
-    # mode=ro：只读。任何 INSERT / UPDATE / DELETE / DROP 都会直接报错。
+    # mode=ro: read-only. Any INSERT / UPDATE / DELETE / DROP fails immediately.
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def _fmt(value: float, unit: str) -> str:
-    """391035000000 → '391.035B USD'。只用于显示，数据库里存的始终是原始值。"""
+    """391035000000 -> '391.035B USD'. Display only; the database always stores raw values."""
     if unit == "USD":
         for size, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M")):
             if abs(value) >= size:
@@ -42,14 +42,14 @@ def _fmt(value: float, unit: str) -> str:
         return f"{value:,.0f} USD"
     if unit == "shares":
         return f"{value / 1e9:,.3f}B shares" if abs(value) >= 1e9 else f"{value / 1e6:,.1f}M shares"
-    return f"{value} {unit}"  # EPS：美元/股，不换算
+    return f"{value} {unit}"  # EPS is USD per share: no scaling
 
 
-# ──────────────────────────── 工具 1：get_metric ────────────────────────────
+# ──────────────────────────── Tool 1: get_metric ────────────────────────────
 
 def get_metric(ticker: str, metric: str, fiscal_year: int) -> dict:
     ticker = str(ticker).upper().strip()
-    # 白名单检查：在查数据库之前，先确认参数是合法的。
+    # Whitelist check: validate arguments before touching the database.
     if metric not in METRICS:
         return {"error": f"unknown metric '{metric}'",
                 "hint": f"valid metrics: {sorted(METRICS)}"}
@@ -86,10 +86,10 @@ def get_metric(ticker: str, metric: str, fiscal_year: int) -> dict:
     }
 
 
-# ──────────────────────────── 工具 2：calculator ────────────────────────────
-# 不用 Python 自带的 eval()：eval 能执行任意代码，
-# 例如 eval("__import__('os').system('rm -rf ~')") 会删掉你的文件。
-# 这里先把表达式解析成"语法树"，然后只允许数字和 + - * / ** ( ) 通过。
+# ──────────────────────────── Tool 2: calculator ────────────────────────────
+# Python's built-in eval() is not used: it executes arbitrary code,
+# e.g. eval("__import__('os').system('rm -rf ~')") would delete your files.
+# Instead the expression is parsed into an AST and only numbers and + - * / ** ( ) are allowed.
 
 _OPS = {
     ast.Add: operator.add, ast.Sub: operator.sub,
@@ -104,7 +104,7 @@ def _eval_node(node):
     if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
         left, right = _eval_node(node.left), _eval_node(node.right)
         if isinstance(node.op, ast.Pow) and abs(right) > 100:
-            raise ValueError("exponent too large")  # 防止 9**9**9 这种算到死机的输入
+            raise ValueError("exponent too large")  # guard against inputs like 9**9**9 that never finish
         return _OPS[type(node.op)](left, right)
     if isinstance(node, ast.UnaryOp) and type(node.op) in _OPS:
         return _OPS[type(node.op)](_eval_node(node.operand))
@@ -112,7 +112,7 @@ def _eval_node(node):
 
 
 def calculator(expression: str) -> dict:
-    expr = str(expression).replace(",", "")  # 允许 "391,035" 这种写法
+    expr = str(expression).replace(",", "")  # accept thousands separators such as "391,035"
     try:
         result = _eval_node(ast.parse(expr, mode="eval").body)
     except ZeroDivisionError:
@@ -123,7 +123,7 @@ def calculator(expression: str) -> dict:
     return {"expression": expression, "result": result}
 
 
-# ──────────────────────────── 工具 3：list_companies ────────────────────────────
+# ──────────────────────────── Tool 3: list_companies ────────────────────────────
 
 def list_companies() -> dict:
     with _connect_readonly() as conn:
@@ -137,18 +137,18 @@ def list_companies() -> dict:
     }
 
 
-# ──────────────────────────── 工具 4：search_filings ────────────────────────────
+# ──────────────────────────── Tool 4: search_filings ────────────────────────────
 
-SEARCH_MODE = "hybrid"   # "hybrid" / "bm25" / "vector"。M5 做 ablation 时由评测脚本修改
+SEARCH_MODE = "hybrid"   # "hybrid" / "bm25" / "vector"; the eval script changes this for ablations (M5)
 
 def search_filings(query: str, ticker: str | None = None, fiscal_year: int | None = None,
                    top_k: int = 5) -> dict:
-    from .rag import get_index   # 用到时才加载索引（几秒钟），只查数字的问题不用等
+    from .rag import get_index   # lazy import: loading the index takes a few seconds, numeric-only questions skip it
 
     ticker = str(ticker).upper().strip() if ticker else None
     try:
         fiscal_year = int(fiscal_year) if fiscal_year else None
-        top_k = max(1, min(int(top_k), 8))   # 最多 8 块：再多会挤占模型的上下文
+        top_k = max(1, min(int(top_k), 8))   # at most 8 passages: more would crowd the model's context
     except (TypeError, ValueError):
         return {"error": "fiscal_year and top_k must be integers"}
 
@@ -163,8 +163,8 @@ def search_filings(query: str, ticker: str | None = None, fiscal_year: int | Non
     } for h in hits]}
 
 
-# ──────────────────────────── 说明书（发给模型） ────────────────────────────
-# OpenAI tool calling 格式。description 写得越清楚，模型越不容易用错。
+# ──────────────────────────── Schemas (sent to the model) ────────────────────────────
+# OpenAI tool-calling format. The clearer the descriptions, the less often the model misuses a tool.
 
 TOOL_SCHEMAS = [
     {"type": "function", "function": {
@@ -207,13 +207,13 @@ TOOL_SCHEMAS = [
     }},
 ]
 
-# 名字 → 函数。harness 收到 "get_metric" 这个名字，就从这里找到对应的函数去执行。
+# Name -> function. When the model calls "get_metric", the harness looks up the function here.
 TOOL_FUNCTIONS = {"get_metric": get_metric, "calculator": calculator,
                   "search_filings": search_filings, "list_companies": list_companies}
 
 
 def run_tool(name: str, arguments: str | dict) -> str:
-    """harness 唯一需要调用的入口：工具名 + 参数（模型给的 JSON 字符串）→ 结果（JSON 字符串）。"""
+    """Single entry point for the harness: tool name + arguments (JSON string from the model) -> result (JSON string)."""
     if name not in TOOL_FUNCTIONS:
         return json.dumps({"error": f"unknown tool '{name}'", "hint": f"available: {list(TOOL_FUNCTIONS)}"})
     try:
@@ -222,6 +222,6 @@ def run_tool(name: str, arguments: str | dict) -> str:
         return json.dumps({"error": f"arguments are not valid JSON: {e}"})
     try:
         result = TOOL_FUNCTIONS[name](**args)
-    except TypeError as e:  # 参数名写错、少传参数
+    except TypeError as e:  # misspelled or missing arguments
         return json.dumps({"error": f"bad arguments: {e}"})
     return json.dumps(result, ensure_ascii=False)

@@ -1,8 +1,9 @@
 """
-检索 ablation（不经过 Agent，结果是确定的）：
-把 Agent 在评测中实际写出的检索查询拿出来，在不同检索方式、不同条件下重放，统计 hit@k。
-hit@k = 前 k 个结果里，至少有一块包含关键句的比例。
-用法：python evals/retrieval_ablation.py final
+Retrieval ablation (no agent involved, so results are deterministic):
+replay the search queries the agent actually wrote during evaluation under different retrieval modes
+and conditions, and report hit@k.
+hit@k = fraction of queries where at least one of the top-k chunks contains the key phrase.
+Usage: python evals/retrieval_ablation.py final
 """
 import json
 import sys
@@ -16,7 +17,7 @@ prefix = sys.argv[1] if len(sys.argv) > 1 else "final"
 items = {json.loads(l)["id"]: json.loads(l) for n in ("questions", "hard")
          for l in open(ROOT / "evals" / f"{n}.jsonl")}
 
-# 收集 (查询, ticker, 年份, 关键句)：每道题取 Agent 第一次检索时写的查询
+# Collect (query, ticker, year, key phrases), using the agent's first search query for each question
 cases = {}
 for p in sorted((ROOT / "evals" / "results").glob(f"{prefix}_[0-9].json")):
     for r in json.loads(p.read_text()):

@@ -1,15 +1,18 @@
 """
-M5 评测：跑 40 道题 → 自动评分 → 输出汇总。
+M5 evaluation: run the question set -> score automatically -> print a summary.
 
-用法：python evals/run_eval.py [--name baseline] [--no-calculator] [--search-mode hybrid|bm25|vector]
+Usage: python evals/run_eval.py [--set questions|hard|all] [--name NAME]
+                                [--no-calculator | --no-calculator-fair] [--search-mode hybrid|bm25|vector]
 
-评分规则：
-- 数字题（lookup / calc）：从答案里提取所有带单位的数字，只要有一个与标准答案相对误差 < 1% 就算对。
-  有 entity 的题（"谁更高"）还要求答案里提到正确的公司。
-- 原文题（text）：
-  ① 检索命中（retrieval hit）：Agent 检索到的段落里，有没有包含关键句的段落；
-  ② 引用有效（citation valid）：答案里写的 chunk_id，是否都真的出现在检索结果里（防止编造引用）；
-  ③ LLM-as-judge：用更强的模型，对照要点给 1–5 分。
+Scoring:
+- Numeric questions (lookup / calc / hard_num): extract every number-with-unit from the answer;
+  correct if any is within 1% relative error of the gold value. Questions with an `entity`
+  ("which company is higher") must also name the right company.
+- Text questions (text / hard_text):
+  1. retrieval hit: did any retrieved passage contain the key phrase?
+  2. citations: does the answer cite chunk_ids, and were all of them actually retrieved (no fabrication)?
+  3. LLM-as-judge: a stronger model scores the answer 1-5 against reference key points.
+- Unanswerable questions: a judge checks that the answer clearly says the data is unavailable.
 """
 from __future__ import annotations
 
@@ -29,17 +32,18 @@ from openai import OpenAI
 from finagent import tools as tools_mod
 from finagent.agent import SYSTEM_PROMPT, Agent
 
-# 公平的 ablation：拿掉 calculator 的同时，也要拿掉"必须用 calculator"这条规则，否则测的是"规则与工具矛盾"
+# Fair ablation: when the calculator is removed, the "always use the calculator" rule must go too;
+# otherwise the experiment measures a rule/tool conflict rather than the calculator's value.
 _RULE2 = SYSTEM_PROMPT[SYSTEM_PROMPT.index("2. Never do arithmetic"):SYSTEM_PROMPT.index("3. If a metric")]
 NO_CALC_PROMPT = SYSTEM_PROMPT.replace(_RULE2, "2. Do all arithmetic yourself, carefully and step by step.\n")
 from finagent.config import get_settings
 from finagent.rag import get_index
 from finagent.tools import get_metric
 
-JUDGE_MODEL = "gpt-5.4"   # 裁判用比 Agent 更强的模型，减少"自己给自己打分"的偏差
+JUDGE_MODEL = "gpt-5.4"   # a stronger model than the agent, to reduce self-preference bias
 
 
-# ──────────────── 标准答案：直接从数据库算 ────────────────
+# ──────────────── Gold answers: computed directly from the database ────────────────
 def M(ticker, metric, year):
     r = get_metric(ticker, metric, year)
     if "error" in r:
@@ -47,16 +51,17 @@ def M(ticker, metric, year):
     return r["value"]
 
 
-# ──────────────── 从答案里提取数字 ────────────────
+# ──────────────── Extract numbers from an answer ────────────────
 _SCALE = {"T": 1e12, "trillion": 1e12, "万亿": 1e12, "B": 1e9, "billion": 1e9, "亿": 1e8,
           "M": 1e6, "million": 1e6, "百万": 1e6, "万": 1e4}
-# "个百分点" / "percentage points" / "pp" 也是百分比（两个百分比之差），要和 % 一样处理
+# "个百分点" (Chinese for "percentage points") / "percentage points" / "pp" are differences of percentages;
+# treat them like %
 _NUM = re.compile(r"([-−–]?\$?\s?\d[\d,]*(?:\.\d+)?)\s*(万亿|trillion|billion|million|百万|亿|万|个百分点|百分点|percentage points?|pp\b|T|B|M|%)?", re.I)
 _PCT = {"%", "个百分点", "百分点", "pp", "percentage point", "percentage points"}
 
 
 def extract_numbers(text: str) -> list[tuple[float, str, int]]:
-    """返回 [(数值, 类型, 小数位数), ...]。小数位数用来判断"四舍五入后是否一致"。"""
+    """Return [(value, kind, decimals), ...]. `decimals` is used to accept correctly rounded answers."""
     out = []
     for m in _NUM.finditer(text.replace("**", "")):
         raw, suf = m.group(1), (m.group(2) or "")
@@ -83,20 +88,20 @@ def number_match(answer: str, gold: float, unit: str, tol: float = 0.01, use_abs
             continue
         if unit == "count" and kind == "%":
             continue
-        # 金额比较绝对值：答案常写成"净亏损 2.2B"而不带负号
+        # Compare absolute amounts: answers often say "net loss of 2.2B" without a minus sign
         a, g = (abs(v), abs(gold)) if (unit == "USD" or use_abs) else (v, gold)
         if g == 0:
             if abs(a) < 1e-9:
                 return True
         elif abs(a - g) / abs(g) < tol:
             return True
-        # 比率、百分比：模型按规则保留了 2 位小数（0.1578 → 0.16），四舍五入后一致也算对
+        # Ratios / percentages: the model rounds to 2 decimals by rule (0.1578 -> 0.16); accept if rounding matches
         elif unit in ("%", "ratio") and kind != "abs" and round(g, dec) == round(a, dec) and dec >= 1:
             return True
     return False
 
 
-# ──────────────── 原文题：检索命中、引用有效、LLM 裁判 ────────────────
+# ──────────────── Text questions: retrieval hit, citations, LLM judge ────────────────
 def retrieved_chunks(trace) -> dict[str, str]:
     got = {}
     for t in trace:
@@ -151,18 +156,18 @@ Return JSON only: {{"pass": true/false, "reason": "<one sentence>"}}"""
     return json.loads(r.choices[0].message.content)
 
 
-# ──────────────── 跑一道题 ────────────────
+# ──────────────── Run one question ────────────────
 def run_one(item, tool_names, system_prompt=None):
     t0 = time.time()
     try:
         res = Agent(tool_names=tool_names, log=False, system_prompt=system_prompt).run(item["q"], verbose=False)
-    except Exception as e:  # 一道题出错不能让整个评测停掉
+    except Exception as e:  # one failing question must not stop the whole run
         return {**item, "error": repr(e), "correct": False}
     rec = {"id": item["id"], "type": item["type"], "q": item["q"], "answer": res.answer,
            "steps": res.steps, "stopped_reason": res.stopped_reason, "seconds": round(time.time() - t0, 1),
            "tools_used": [t["tool"] for t in res.trace if t["type"] == "tool_call"], "trace": res.trace}
     if item["type"] in ("lookup", "calc", "hard_num"):
-        gold = eval(item["gold"], {"M": M, "abs": abs, "sum": sum, "range": range})  # gold 是我们自己写的，可以 eval
+        gold = eval(item["gold"], {"M": M, "abs": abs, "sum": sum, "range": range})  # gold expressions are ours, not model output, so eval is safe
         ok = number_match(res.answer, gold, item["unit"], use_abs=item.get("abs", False))
         if ok and item.get("entity"):
             ok = any(e.lower() in res.answer.lower() for e in item["entity"])
@@ -175,7 +180,8 @@ def run_one(item, tool_names, system_prompt=None):
         hit = any(p.lower() in txt.lower() for txt in got.values() for p in item["gold_phrases"])
         cited = set(re.findall(r"[A-Z]{1,5}_20\d\d_(?:1A|1|7|FULL)_\d{3}", res.answer))
         j = judge(item["q"], item["key_points"], res.answer)
-        # 引用分两项看：① 有没有写 chunk_id（是否遵守格式）；② 写了的是否都真的检索到过（是否编造）
+        # Citations are checked twice: (1) were chunk_ids cited at all (format compliance);
+        # (2) were all cited chunks actually retrieved (no fabrication)
         rec.update(retrieval_hit=hit, cited=sorted(cited), has_citation=bool(cited),
                    fabricated=sorted(cited - set(got)), citation_valid=bool(cited) and cited <= set(got), judge=j,
                    correct=j.get("score", 0) >= 4)
@@ -199,13 +205,13 @@ def main():
     if args.no_calculator_fair:
         system_prompt = NO_CALC_PROMPT
     tools_mod.SEARCH_MODE = args.search_mode
-    get_index()   # 先加载索引，避免 8 个线程同时加载
+    get_index()   # load the index up front so 8 threads don't each load it
 
     sets = ["questions", "hard"] if args.set == "all" else [args.set]
     items = [json.loads(l) for name in sets for l in open(ROOT / "evals" / f"{name}.jsonl")]
     if args.only:
         items = [i for i in items if i["type"] == args.only]
-    with ThreadPoolExecutor(args.workers) as ex:   # 8 道题同时跑：40 题从约 7 分钟缩短到约 1 分钟
+    with ThreadPoolExecutor(args.workers) as ex:   # 8 questions in parallel: ~7 minutes -> ~1 minute
         results = list(ex.map(lambda it: run_one(it, tool_names, system_prompt), items))
 
     out = ROOT / "evals" / "results"

@@ -1,6 +1,6 @@
 """
-列出你的 API key 能用的模型 ID，方便填写 .env 里的 LLM_MODEL。
-用法：python scripts/list_models.py
+List the model IDs available to your API key, to help fill in LLM_MODEL in .env.
+Usage: python scripts/list_models.py
 """
 import sys
 from pathlib import Path
